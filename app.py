@@ -3,22 +3,22 @@ import pandas as pd
 import altair as alt
 
 # =========================
-# CONFIG PAGE
+# CONFIGURATION DE LA PAGE
 # =========================
 st.set_page_config(
-    page_title="Construction Materials Database",
+    page_title="Base de données des matériaux de construction",
     page_icon="🧱",
     layout="wide"
 )
 
 # =========================
-# CUSTOM CSS (dark UI)
+# CSS PERSONNALISÉ (thème sombre + cartes)
 # =========================
 st.markdown(
     """
     <style>
     .main {
-        background-color: #020617;
+        background-color: #020617;  /* fond global très sombre */
         color: #e5e7eb;
     }
 
@@ -34,8 +34,9 @@ st.markdown(
         border: 1px solid rgba(148, 163, 184, 0.4);
     }
 
+    /* Cartes matériaux : fond un peu plus clair que la page */
     .material-card {
-        background: #020617;
+        background: #0b1120;  /* différent du fond de la page */
         border-radius: 18px;
         border: 1px solid rgba(148, 163, 184, 0.35);
         box-shadow: 0 20px 25px -5px rgba(15,23,42,0.65),
@@ -45,59 +46,67 @@ st.markdown(
         overflow: hidden;
     }
 
+    /* Bandeau de couleur quand il n'y a pas d'image */
     .material-banner {
         height: 140px;
-        background: linear-gradient(120deg, #4f46e5, #ec4899, #f97316);
+        width: 100%;
+        background: linear-gradient(135deg, #22c55e, #16a34a, #14532d);
+    }
+
+    /* Wrapper pour toutes les images => hauteur uniforme */
+    .material-img-wrapper {
+        height: 140px;               /* hauteur fixe */
+        width: 100%;
+        background: linear-gradient(135deg, #22c55e, #16a34a, #14532d);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+
+    .material-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;           /* recadre pour remplir sans déformer */
     }
 
     .material-content {
-        padding: 1.1rem 1.4rem 1.3rem 1.4rem;
+        padding: 0.9rem 1.1rem 1.1rem 1.1rem;
     }
 
     .material-title {
-        font-size: 1.25rem;
+        font-size: 1.05rem;
         font-weight: 600;
         margin-bottom: 0.1rem;
     }
 
     .material-subtitle {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         color: #9ca3af;
-        margin-bottom: 0.9rem;
+        margin-bottom: 0.5rem;
     }
 
     .section-title {
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         letter-spacing: .08em;
         text-transform: uppercase;
-        color: #60a5fa;
-        border-bottom: 1px solid #1d4ed8;
-        padding-bottom: 0.25rem;
-        margin-bottom: 0.4rem;
+        color: #22c55e;
+        border-bottom: 1px solid #22c55e;
+        padding-bottom: 0.15rem;
+        margin-bottom: 0.25rem;
         margin-top: 0.4rem;
     }
 
     .metric-label {
         font-size: 0.8rem;
         color: #9ca3af;
-        margin-bottom: 0.15rem;
+        margin-bottom: 0.1rem;
     }
 
     .metric-value {
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         font-weight: 500;
-        margin-bottom: 0.35rem;
-    }
-
-    .chip {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 999px;
-        font-size: 0.7rem;
-        margin-right: 4px;
-        margin-bottom: 4px;
-        background: rgba(148, 163, 184, 0.16);
-        color: #e5e7eb;
+        margin-bottom: 0.25rem;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -111,17 +120,21 @@ st.markdown(
         color: #e5e7eb;
         border: 1px solid rgba(148, 163, 184, 0.4);
     }
+
+    .stTabs [aria-selected="true"] {
+        border-color: #22c55e !important;
+        background: rgba(34,197,94,0.09) !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # =========================
-# LOAD DATA FROM CSV
+# CHARGEMENT DES DONNÉES
 # =========================
 
-# 👉 Mets ici le NOM EXACT de ton CSV arrondi (celui que tu utilises)
-CSV_FILE = "materiaux_clean.csv"   # par ex: materiaux_filled_rounded.csv renommé
+CSV_FILE = "materiaux_clean.csv"  # ton CSV nettoyé
 
 @st.cache_data
 def load_data(csv_file: str) -> pd.DataFrame:
@@ -144,10 +157,63 @@ def load_data(csv_file: str) -> pd.DataFrame:
 
     return df
 
+def add_eco_score(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ajoute une colonne 'eco_score' (0-100) basée sur :
+    - cout_eur_m2 (plus c'est bas, mieux c'est)
+    - empreinte_carbone_kgco2e_kg (plus c'est bas, mieux c'est)
+    - conductivite_w_mk (plus c'est bas, mieux c'est)
+    - contenu_recycle_pct (plus c'est haut, mieux c'est)
+    """
+    df = df.copy()
+
+    for col in ["cout_eur_m2", "empreinte_carbone_kgco2e_kg",
+                "contenu_recycle_pct", "conductivite_w_mk"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    scores = []
+    # Coût (bas = bien)
+    if "cout_eur_m2" in df.columns and df["cout_eur_m2"].notna().sum() > 0:
+        col = df["cout_eur_m2"]
+        mn, mx = col.min(), col.max()
+        if mx > mn:
+            scores.append((mx - col) / (mx - mn))
+
+    # CO2 (bas = bien)
+    if "empreinte_carbone_kgco2e_kg" in df.columns and df["empreinte_carbone_kgco2e_kg"].notna().sum() > 0:
+        col = df["empreinte_carbone_kgco2e_kg"]
+        mn, mx = col.min(), col.max()
+        if mx > mn:
+            scores.append((mx - col) / (mx - mn))
+
+    # Lambda (bas = bien)
+    if "conductivite_w_mk" in df.columns and df["conductivite_w_mk"].notna().sum() > 0:
+        col = df["conductivite_w_mk"]
+        mn, mx = col.min(), col.max()
+        if mx > mn:
+            scores.append((mx - col) / (mx - mn))
+
+    # Contenu recyclé (haut = bien)
+    if "contenu_recycle_pct" in df.columns and df["contenu_recycle_pct"].notna().sum() > 0:
+        col = df["contenu_recycle_pct"]
+        mn, mx = col.min(), col.max()
+        if mx > mn:
+            scores.append((col - mn) / (mx - mn))
+
+    if scores:
+        eco_raw = sum(scores) / len(scores)
+        df["eco_score"] = (eco_raw * 100).round(1)
+    else:
+        df["eco_score"] = None
+
+    return df
+
 df = load_data(CSV_FILE)
+df = add_eco_score(df)
 
 # =========================
-# SMALL UTILS
+# PETITES FONCTIONS UTILES
 # =========================
 def get_range(df, column, fallback_min=0.0, fallback_max=1.0):
     """Retourne (min, max) réels d'une colonne numérique."""
@@ -162,6 +228,7 @@ def get_range(df, column, fallback_min=0.0, fallback_max=1.0):
 
 
 def fmt(val, suffix=""):
+    """Formatage nombre + suffixe, ou tiret si NaN."""
     try:
         if pd.isna(val):
             return "—"
@@ -174,31 +241,30 @@ def fmt(val, suffix=""):
 def get_valid_image_url(row) -> str:
     """Retourne une URL d'image propre ou '' si rien de valide."""
     url = str(row.get("image_url", "")).strip()
-    # On considère valide si ça commence par http ou https
     if url.lower().startswith("http://") or url.lower().startswith("https://"):
         return url
     return ""
 
 
 # =========================
-# SIDEBAR FILTERS
+# SIDEBAR : FILTRES
 # =========================
-st.sidebar.title("🧹 Filter Materials")
+st.sidebar.title("🧹 Filtres matériaux")
 
-# Search by name or description
+# Recherche texte
 search_text = st.sidebar.text_input(
-    "Search by name or description",
-    placeholder="e.g., concrete, wood, insulation..."
+    "Recherche par nom ou description",
+    placeholder="ex : béton, bois, isolant..."
 )
 
-st.sidebar.markdown("### Material Type")
+st.sidebar.markdown("### Classification")
 
-# Type (multi-select)
+# Type (multi-sélection)
 type_options = sorted(df["type"].dropna().unique().tolist()) if "type" in df.columns else []
 selected_types = st.sidebar.multiselect(
-    "Type",
+    "Type principal",
     options=type_options,
-    help="Select one or more main material types."
+    help="Sélectionne un ou plusieurs types de matériaux."
 )
 
 # Sous-type dépendant des types choisis
@@ -213,16 +279,16 @@ else:
     subtype_options = []
 
 selected_subtypes = st.sidebar.multiselect(
-    "Sub-Type",
+    "Sous-type",
     options=subtype_options,
-    help="Filtered based on selected types."
+    help="Liste filtrée selon les types sélectionnés."
 )
 
-st.sidebar.markdown("### Physical Properties")
+st.sidebar.markdown("### Propriétés physiques")
 
 dens_min, dens_max = get_range(df, "masse_volumique_kg_m3", 0.0, 8000.0)
 density_range = st.sidebar.slider(
-    "Density (kg/m³)",
+    "Densité (kg/m³)",
     min_value=float(dens_min),
     max_value=float(dens_max),
     value=(float(dens_min), float(dens_max)),
@@ -232,7 +298,7 @@ density_range = st.sidebar.slider(
 
 lambda_min, lambda_max = get_range(df, "conductivite_w_mk", 0.0, 10.0)
 lambda_range = st.sidebar.slider(
-    "Thermal Conductivity λ (W/m·K)",
+    "Conductivité thermique λ (W/m·K)",
     min_value=float(lambda_min),
     max_value=float(lambda_max),
     value=(float(lambda_min), float(lambda_max)),
@@ -240,25 +306,25 @@ lambda_range = st.sidebar.slider(
     key="lambda_slider",
 )
 
-st.sidebar.markdown("### Source")
+st.sidebar.markdown("### Origine")
 
 if "pays_origine" in df.columns:
     country_options = sorted(df["pays_origine"].dropna().unique().tolist())
 else:
     country_options = []
-selected_countries = st.sidebar.multiselect("Country", country_options)
+selected_countries = st.sidebar.multiselect("Pays", country_options)
 
 if "fabricant" in df.columns:
     manufacturer_options = sorted(df["fabricant"].dropna().unique().tolist())
 else:
     manufacturer_options = []
-selected_manufacturers = st.sidebar.multiselect("Manufacturer", manufacturer_options)
+selected_manufacturers = st.sidebar.multiselect("Fabricant", manufacturer_options)
 
-if st.sidebar.button("Reset All Filters"):
+if st.sidebar.button("🔄 Réinitialiser tous les filtres"):
     st.experimental_rerun()
 
 # =========================
-# APPLY FILTERS
+# APPLICATION DES FILTRES
 # =========================
 filtered = df.copy()
 
@@ -273,7 +339,7 @@ if selected_types and "type" in filtered.columns:
 if selected_subtypes and "sous_type" in filtered.columns:
     filtered = filtered[filtered["sous_type"].isin(selected_subtypes)]
 
-# On garde les matériaux avec NaN dans les colonnes numériques
+# On garde aussi les NaN
 if "masse_volumique_kg_m3" in filtered.columns:
     mask_density = (
         filtered["masse_volumique_kg_m3"].between(density_range[0], density_range[1])
@@ -295,18 +361,18 @@ if selected_manufacturers and "fabricant" in filtered.columns:
     filtered = filtered[filtered["fabricant"].isin(selected_manufacturers)]
 
 # =========================
-# HEADER + METRICS
+# EN-TÊTE + MÉTRIQUES
 # =========================
 header_col1, header_col2 = st.columns([3, 2])
 
 with header_col1:
-    st.markdown("### 🧱 Construction Materials Database")
+    st.markdown("### 🧱 Base de données des matériaux de construction")
     st.markdown(
-        "<h1 style='margin-top:-8px; color:#f9fafb;'>Explore & Compare Materials</h1>",
+        "<h1 style='margin-top:-8px; color:#bbf7d0;'>Explorer & comparer les matériaux</h1>",
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<p style='color:#9ca3af; max-width:650px;'>Explore and compare construction materials based on their physical, thermal and environmental properties.</p>",
+        "<p style='color:#9ca3af; max-width:650px;'>Interface interactive pour comparer les propriétés physiques, thermiques, mécaniques et environnementales des matériaux de construction.</p>",
         unsafe_allow_html=True,
     )
 
@@ -314,17 +380,17 @@ with header_col2:
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-        st.caption("Total Materials")
+        st.caption("Matériaux")
         st.subheader(len(df))
         st.markdown("</div>", unsafe_allow_html=True)
     with m2:
         st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-        st.caption("Filtered Results")
+        st.caption("Filtrés")
         st.subheader(len(filtered))
         st.markdown("</div>", unsafe_allow_html=True)
     with m3:
         st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-        st.caption("Material Types")
+        st.caption("Types")
         if "type" in df.columns:
             st.subheader(df["type"].nunique())
         else:
@@ -332,7 +398,7 @@ with header_col2:
         st.markdown("</div>", unsafe_allow_html=True)
     with m4:
         st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-        st.caption("Countries")
+        st.caption("Pays")
         if "pays_origine" in df.columns:
             st.subheader(df["pays_origine"].nunique())
         else:
@@ -343,156 +409,220 @@ st.markdown("---")
 
 # Petit résumé stats sur les matériaux filtrés
 if not filtered.empty:
-    stats_col1, stats_col2, stats_col3 = st.columns(3)
+    stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
     with stats_col1:
-        st.caption("Average Density (filtered)")
+        st.caption("Densité moyenne (filtré)")
         if "masse_volumique_kg_m3" in filtered.columns:
             st.write(f"{filtered['masse_volumique_kg_m3'].mean():.1f} kg/m³")
         else:
             st.write("—")
     with stats_col2:
-        st.caption("Average λ (filtered)")
+        st.caption("λ moyenne (filtré)")
         if "conductivite_w_mk" in filtered.columns:
             st.write(f"{filtered['conductivite_w_mk'].mean():.3f} W/m·K")
         else:
             st.write("—")
     with stats_col3:
-        st.caption("Average CO₂ footprint (filtered)")
+        st.caption("Empreinte CO₂ moyenne (filtré)")
         if "empreinte_carbone_kgco2e_kg" in filtered.columns:
             st.write(f"{filtered['empreinte_carbone_kgco2e_kg'].mean():.2f} kgCO₂e/kg")
         else:
             st.write("—")
+    with stats_col4:
+        st.caption("Éco-score moyen")
+        if "eco_score" in filtered.columns and filtered["eco_score"].notna().any():
+            st.write(f"{filtered['eco_score'].mean():.1f} / 100")
+        else:
+            st.write("—")
 
 # =========================
-# TABS
+# ONGLETS
 # =========================
 tab1, tab2, tab3, tab4 = st.tabs(
-    ["📂 Materials Explorer", "📊 Compare Materials", "📈 Database Statistics", "✏️ Manage Materials"]
+    ["📂 Parcours des matériaux", "📊 Comparaison", "📈 Statistiques", "🗂 Gestion"]
 )
 
 # =========================
-# TAB 1: MATERIALS EXPLORER
+# ONGLET 1 : PARCOURS
 # =========================
 with tab1:
-    st.markdown(f"### Showing {len(filtered)} material(s)")
+    st.markdown(f"### {len(filtered)} matériau(x) affiché(s)")
 
     sort_option = st.selectbox(
-        "Sort by",
-        ["Name (A→Z)", "Density (low→high)", "Density (high→low)",
-         "λ (low→high)", "λ (high→low)"],
+        "Trier par",
+        ["Nom (A→Z)", "Densité (croissante)", "Densité (décroissante)",
+         "λ (croissante)", "λ (décroissante)", "Éco-score (meilleur en premier)"],
         key="sort_explorer",
     )
 
     filtered_sorted = filtered.copy()
-    if sort_option == "Name (A→Z)" and "nom" in filtered.columns:
+    if sort_option == "Nom (A→Z)" and "nom" in filtered.columns:
         filtered_sorted = filtered.sort_values("nom", ascending=True)
-    elif sort_option == "Density (low→high)" and "masse_volumique_kg_m3" in filtered.columns:
+    elif sort_option == "Densité (croissante)" and "masse_volumique_kg_m3" in filtered.columns:
         filtered_sorted = filtered.sort_values("masse_volumique_kg_m3", ascending=True)
-    elif sort_option == "Density (high→low)" and "masse_volumique_kg_m3" in filtered.columns:
+    elif sort_option == "Densité (décroissante)" and "masse_volumique_kg_m3" in filtered.columns:
         filtered_sorted = filtered.sort_values("masse_volumique_kg_m3", ascending=False)
-    elif sort_option == "λ (low→high)" and "conductivite_w_mk" in filtered.columns:
+    elif sort_option == "λ (croissante)" and "conductivite_w_mk" in filtered.columns:
         filtered_sorted = filtered.sort_values("conductivite_w_mk", ascending=True)
-    elif sort_option == "λ (high→low)" and "conductivite_w_mk" in filtered.columns:
+    elif sort_option == "λ (décroissante)" and "conductivite_w_mk" in filtered.columns:
         filtered_sorted = filtered.sort_values("conductivite_w_mk", ascending=False)
+    elif sort_option == "Éco-score (meilleur en premier)" and "eco_score" in filtered.columns:
+        filtered_sorted = filtered.sort_values("eco_score", ascending=False)
 
     # bouton export CSV
     csv_bytes = filtered_sorted.to_csv(index=False, sep=";").encode("utf-8")
     st.download_button(
-        "📥 Export filtered data to CSV",
+        "📥 Exporter les données filtrées en CSV",
         data=csv_bytes,
-        file_name="materials_filtered.csv",
+        file_name="materiaux_filtres.csv",
         mime="text/csv",
     )
 
     st.write("")
-    for _, row in filtered_sorted.iterrows():
-        st.markdown("<div class='material-card'>", unsafe_allow_html=True)
 
-        # Image si image_url valide, sinon bandeau
-        img_url = get_valid_image_url(row)
-        if img_url:
-            st.image(img_url)
-        else:
-            st.markdown("<div class='material-banner'></div>", unsafe_allow_html=True)
+    # Affichage en grille : 2 cartes par ligne
+    records = filtered_sorted.to_dict("records")
+    for i in range(0, len(records), 2):
+        ligne = records[i:i+2]
+        cols = st.columns(2)
+        for col, row in zip(cols, ligne):
+            with col:
+                st.markdown("<div class='material-card'>", unsafe_allow_html=True)
 
-        st.markdown("<div class='material-content'>", unsafe_allow_html=True)
+                # Image avec hauteur uniforme ou bandeau par défaut
+                img_url = get_valid_image_url(row)
+                if img_url:
+                    st.markdown(
+                        f"""
+                        <div class="material-img-wrapper">
+                            <img src="{img_url}" class="material-img" alt="{row.get('nom', 'Matériau')}">
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown("<div class='material-banner'></div>", unsafe_allow_html=True)
 
-        st.markdown(
-            f"<div class='material-title'>{row.get('nom', 'Material')}</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<div class='material-subtitle'>{row.get('type', '—')} → {row.get('sous_type', '—')}</div>",
-            unsafe_allow_html=True,
-        )
+                st.markdown("<div class='material-content'>", unsafe_allow_html=True)
 
-        desc = row.get("description")
-        if isinstance(desc, str) and desc.strip():
-            st.markdown(f"**Description:** {desc}")
+                # Titre + sous-titre
+                st.markdown(
+                    f"<div class='material-title'>{row.get('nom', 'Matériau')}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='material-subtitle'>{row.get('type', '—')} → {row.get('sous_type', '—')}</div>",
+                    unsafe_allow_html=True,
+                )
 
-        st.markdown("<div class='section-title'>PHYSICAL PROPERTIES</div>", unsafe_allow_html=True)
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            st.markdown("<div class='metric-label'>Density</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='metric-value'>{fmt(row.get('masse_volumique_kg_m3'), ' kg/m³')}</div>",
-                unsafe_allow_html=True,
-            )
-        with col_p2:
-            st.markdown("<div class='metric-label'>Thermal Conductivity λ</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='metric-value'>{fmt(row.get('conductivite_w_mk'), ' W/m·K')}</div>",
-                unsafe_allow_html=True,
-            )
+                # Description courte
+                desc = row.get("description")
+                if isinstance(desc, str) and desc.strip():
+                    if len(desc) > 160:
+                        short = desc[:160].rstrip() + "..."
+                    else:
+                        short = desc
+                    st.markdown(f"**Résumé :** {short}")
 
-        st.markdown("<div class='section-title'>THERMAL & MECHANICAL</div>", unsafe_allow_html=True)
-        col_tm1, col_tm2 = st.columns(2)
-        with col_tm1:
-            st.markdown("<div class='metric-label'>Compressive Strength</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='metric-value'>{fmt(row.get('resistance_compression_mpa'), ' MPa')}</div>",
-                unsafe_allow_html=True,
-            )
-        with col_tm2:
-            st.markdown("<div class='metric-label'>Thermal Capacity</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='metric-value'>{fmt(row.get('capacite_thermique_j_kgk'), ' J/kg·K')}</div>",
-                unsafe_allow_html=True,
-            )
+                # Résumé de 4 propriétés clés en frontal
+                col_key1, col_key2, col_key3, col_key4 = st.columns(4)
+                with col_key1:
+                    st.markdown("<div class='metric-label'>Densité</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='metric-value'>{fmt(row.get('masse_volumique_kg_m3'), ' kg/m³')}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with col_key2:
+                    st.markdown("<div class='metric-label'>λ</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='metric-value'>{fmt(row.get('conductivite_w_mk'), ' W/m·K')}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with col_key3:
+                    st.markdown("<div class='metric-label'>CO₂</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='metric-value'>{fmt(row.get('empreinte_carbone_kgco2e_kg'), ' kgCO₂e/kg')}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with col_key4:
+                    st.markdown("<div class='metric-label'>Éco-score</div>", unsafe_allow_html=True)
+                    eco = row.get("eco_score")
+                    eco_txt = "—" if pd.isna(eco) else f"{eco:.1f}/100"
+                    st.markdown(
+                        f"<div class='metric-value'>{eco_txt}</div>",
+                        unsafe_allow_html=True,
+                    )
 
-        st.markdown("<div class='section-title'>SUSTAINABILITY</div>", unsafe_allow_html=True)
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            st.markdown("<div class='metric-label'>Recycled Content</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='metric-value'>{fmt(row.get('contenu_recycle_pct'), ' %')}</div>",
-                unsafe_allow_html=True,
-            )
-        with col_s2:
-            st.markdown("<div class='metric-label'>CO₂ Footprint</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='metric-value'>{fmt(row.get('empreinte_carbone_kgco2e_kg'), ' kgCO₂e/kg')}</div>",
-                unsafe_allow_html=True,
-            )
+                # DÉTAILS DANS UN EXPANDER
+                with st.expander("🔍 Afficher plus de détails"):
+                    st.markdown("<div class='section-title'>Propriétés physiques</div>", unsafe_allow_html=True)
+                    col_p1, col_p2 = st.columns(2)
+                    with col_p1:
+                        st.markdown("<div class='metric-label'>Densité</div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='metric-value'>{fmt(row.get('masse_volumique_kg_m3'), ' kg/m³')}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with col_p2:
+                        st.markdown("<div class='metric-label'>Conductivité thermique λ</div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='metric-value'>{fmt(row.get('conductivite_w_mk'), ' W/m·K')}</div>",
+                            unsafe_allow_html=True,
+                        )
 
-        st.markdown("<div class='section-title'>SOURCE INFORMATION</div>", unsafe_allow_html=True)
-        src_parts = []
-        if isinstance(row.get("fabricant"), str) and row["fabricant"].strip():
-            src_parts.append(f"Manufacturer: {row['fabricant']}")
-        if isinstance(row.get("pays_origine"), str) and row["pays_origine"].strip():
-            src_parts.append(f"Country: {row['pays_origine']}")
-        if isinstance(row.get("origine"), str) and row["origine"].strip():
-            src_parts.append(f"Origin: {row['origine']}")
-        if src_parts:
-            st.markdown(" | ".join(src_parts))
+                    st.markdown("<div class='section-title'>Thermique & mécanique</div>", unsafe_allow_html=True)
+                    col_tm1, col_tm2 = st.columns(2)
+                    with col_tm1:
+                        st.markdown("<div class='metric-label'>Résistance en compression</div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='metric-value'>{fmt(row.get('resistance_compression_mpa'), ' MPa')}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with col_tm2:
+                        st.markdown("<div class='metric-label'>Capacité thermique massique</div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='metric-value'>{fmt(row.get('capacite_thermique_j_kgk'), ' J/kg·K')}</div>",
+                            unsafe_allow_html=True,
+                        )
 
-        st.markdown("</div></div>", unsafe_allow_html=True)
+                    st.markdown("<div class='section-title'>Environnement & durabilité</div>", unsafe_allow_html=True)
+                    col_s1, col_s2 = st.columns(2)
+                    with col_s1:
+                        st.markdown("<div class='metric-label'>Contenu recyclé</div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='metric-value'>{fmt(row.get('contenu_recycle_pct'), ' %')}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with col_s2:
+                        st.markdown("<div class='metric-label'>Empreinte carbone</div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='metric-value'>{fmt(row.get('empreinte_carbone_kgco2e_kg'), ' kgCO₂e/kg')}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown("<div class='metric-label'>Éco-score global</div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<div class='metric-value'>{eco_txt}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    st.markdown("<div class='section-title'>Origine</div>", unsafe_allow_html=True)
+                    src_parts = []
+                    if isinstance(row.get("fabricant"), str) and row["fabricant"].strip():
+                        src_parts.append(f"Fabricant : {row['fabricant']}")
+                    if isinstance(row.get("pays_origine"), str) and row["pays_origine"].strip():
+                        src_parts.append(f"Pays : {row['pays_origine']}")
+                    if isinstance(row.get("origine"), str) and row["origine"].strip():
+                        src_parts.append(f"Origine : {row['origine']}")
+                    if src_parts:
+                        st.markdown(" | ".join(src_parts))
+
+                st.markdown("</div></div>", unsafe_allow_html=True)
 
 # =========================
-# TAB 2: COMPARE MATERIALS (graphique)
+# ONGLET 2 : COMPARAISON
 # =========================
 with tab2:
-    st.markdown("### 📊 Compare Materials")
+    st.markdown("### 📊 Comparer plusieurs matériaux")
 
     if "nom" in df.columns:
         options = df["nom"].tolist()
@@ -500,13 +630,13 @@ with tab2:
         options = []
 
     selected_for_compare = st.multiselect(
-        "Select materials to compare (up to 6)",
+        "Sélectionne les matériaux à comparer (max 6)",
         options=options,
         max_selections=6,
     )
 
     if not selected_for_compare:
-        st.info("Select at least one material in the dropdown above to compare.")
+        st.info("Sélectionne au moins un matériau dans la liste ci-dessus pour lancer la comparaison.")
     else:
         comp_df = df[df["nom"].isin(selected_for_compare)].copy()
 
@@ -519,53 +649,193 @@ with tab2:
             "contenu_recycle_pct",
             "empreinte_carbone_kgco2e_kg",
             "cout_eur_m2",
+            "eco_score",
             "pays_origine",
         ]
         cols_to_show = [c for c in cols_to_show if c in comp_df.columns]
 
+        st.markdown("#### Vue tableau")
         st.dataframe(comp_df[cols_to_show].set_index("nom"), use_container_width=True)
 
         st.markdown("---")
-        st.markdown("#### Graphical comparison")
+        st.markdown("#### Profils graphiques")
 
-        def metric_bar_chart(df_, col, title, y_label):
-            if col not in df_.columns or df_[col].isna().all():
-                st.write(f"No data for **{title}**")
-                return
-            chart = (
-                alt.Chart(df_)
+        # Barres horizontales densité
+        if "masse_volumique_kg_m3" in comp_df.columns:
+            chart_density = (
+                alt.Chart(comp_df)
                 .mark_bar()
                 .encode(
-                    x=alt.X("nom:N", sort="-y", title="Material"),
-                    y=alt.Y(f"{col}:Q", title=y_label),
+                    x=alt.X("masse_volumique_kg_m3:Q", title="Densité (kg/m³)"),
+                    y=alt.Y("nom:N", sort="-x", title="Matériau"),
                     color=alt.Color("nom:N", legend=None),
-                    tooltip=["nom", col],
+                    tooltip=["nom", "masse_volumique_kg_m3"],
                 )
-                .properties(height=250, title=title)
+                .properties(height=250, title="Densité des matériaux (barres horizontales)")
             )
-            st.altair_chart(chart, use_container_width=True)
+        else:
+            chart_density = None
+
+        # Barres λ
+        if "conductivite_w_mk" in comp_df.columns:
+            chart_lambda = (
+                alt.Chart(comp_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("nom:N", sort="-y", title="Matériau"),
+                    y=alt.Y("conductivite_w_mk:Q", title="λ (W/m·K)"),
+                    color=alt.Color("nom:N", legend=None),
+                    tooltip=["nom", "conductivite_w_mk"],
+                )
+                .properties(height=250, title="Comparaison des conductivités λ")
+                .interactive()
+            )
+        else:
+            chart_lambda = None
+
+        # Nuage densité vs λ pour les matériaux sélectionnés
+        if "masse_volumique_kg_m3" in comp_df.columns and "conductivite_w_mk" in comp_df.columns:
+            scatter_sel = (
+                alt.Chart(comp_df)
+                .mark_circle(size=180)
+                .encode(
+                    x=alt.X("masse_volumique_kg_m3:Q", title="Densité (kg/m³)"),
+                    y=alt.Y("conductivite_w_mk:Q", title="λ (W/m·K)"),
+                    color=alt.Color("nom:N", title="Matériau"),
+                    tooltip=["nom", "type", "masse_volumique_kg_m3", "conductivite_w_mk"],
+                )
+                .properties(height=280, title="Positionnement λ / densité des matériaux sélectionnés")
+                .interactive()
+            )
+        else:
+            scatter_sel = None
 
         c1, c2 = st.columns(2)
         with c1:
-            metric_bar_chart(comp_df, "masse_volumique_kg_m3",
-                             "Density comparison", "Density (kg/m³)")
+            if chart_density is not None:
+                st.altair_chart(chart_density, use_container_width=True)
+            else:
+                st.write("Données densité manquantes.")
         with c2:
-            metric_bar_chart(comp_df, "conductivite_w_mk",
-                             "Thermal conductivity λ comparison", "λ (W/m·K)")
+            if chart_lambda is not None:
+                st.altair_chart(chart_lambda, use_container_width=True)
+            else:
+                st.write("Données λ manquantes.")
 
-        c3, c4 = st.columns(2)
-        with c3:
-            metric_bar_chart(comp_df, "resistance_compression_mpa",
-                             "Compressive strength comparison", "Strength (MPa)")
-        with c4:
-            metric_bar_chart(comp_df, "cout_eur_m2",
-                             "Cost comparison", "Cost (€/m²)")
+        st.markdown("#### Nuage de points détaillé")
+        if scatter_sel is not None:
+            st.altair_chart(scatter_sel, use_container_width=True)
+        else:
+            st.write("Données insuffisantes pour le nuage de points.")
+
+        # Éco-score comparatif
+        if "eco_score" in comp_df.columns and comp_df["eco_score"].notna().any():
+            st.markdown("#### Éco-score des matériaux sélectionnés")
+            chart_eco = (
+                alt.Chart(comp_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("nom:N", sort="-y", title="Matériau"),
+                    y=alt.Y("eco_score:Q", title="Éco-score (0–100)"),
+                    color=alt.Color("nom:N", legend=None),
+                    tooltip=["nom", "eco_score"],
+                )
+                .properties(height=250)
+            )
+            st.altair_chart(chart_eco, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("### 🧱 Scénario de paroi (R thermique & éco-score)")
+
+        st.write(
+            "Compose une paroi en choisissant plusieurs couches de matériaux et leurs épaisseurs. "
+            "L’application calcule la **résistance thermique totale R** et un **éco-score moyen de la paroi**."
+        )
+
+        nb_couches = st.number_input(
+            "Nombre de couches",
+            min_value=1,
+            max_value=6,
+            value=3,
+            step=1,
+            key="nb_couches_paroi",
+        )
+
+        couches = []
+        for i in range(int(nb_couches)):
+            cmat, cep = st.columns([2, 1])
+            with cmat:
+                mat = st.selectbox(
+                    f"Couche {i+1} – matériau",
+                    options=options,
+                    key=f"paroi_mat_{i}",
+                )
+            with cep:
+                ep_cm = st.number_input(
+                    f"Épaisseur {i+1} (cm)",
+                    min_value=0.0,
+                    max_value=200.0,
+                    value=10.0,
+                    step=0.5,
+                    key=f"paroi_ep_{i}",
+                )
+
+            if mat:
+                row_mat = df[df["nom"] == mat].iloc[0]
+                lam = pd.to_numeric(row_mat.get("conductivite_w_mk"), errors="coerce")
+                eco = pd.to_numeric(row_mat.get("eco_score"), errors="coerce")
+                if pd.notna(lam) and lam > 0:
+                    R_i = (ep_cm / 100.0) / lam
+                else:
+                    R_i = None
+                couches.append(
+                    {
+                        "Couche": i + 1,
+                        "Matériau": mat,
+                        "Épaisseur (cm)": ep_cm,
+                        "λ (W/m·K)": lam,
+                        "R (m²K/W)": R_i,
+                        "Éco-score": eco,
+                    }
+                )
+
+        if couches:
+            df_paroi = pd.DataFrame(couches)
+
+            R_total = df_paroi["R (m²K/W)"].dropna().sum()
+            # Éco-score moyen pondéré par l'épaisseur
+            if df_paroi["Épaisseur (cm)"].sum() > 0 and df_paroi["Éco-score"].notna().any():
+                eco_paroi = (
+                    (df_paroi["Épaisseur (cm)"] * df_paroi["Éco-score"])
+                    .sum()
+                    / df_paroi["Épaisseur (cm)"].sum()
+                )
+            else:
+                eco_paroi = None
+
+            st.markdown("#### Résultats du scénario")
+            colR, colE = st.columns(2)
+            with colR:
+                st.markdown("**Résistance thermique totale R :**")
+                if R_total > 0:
+                    st.markdown(f"👉 **R = {R_total:.3f} m²K/W**")
+                else:
+                    st.markdown("Données λ insuffisantes pour calculer R.")
+            with colE:
+                st.markdown("**Éco-score moyen de la paroi :**")
+                if eco_paroi is not None:
+                    st.markdown(f"👉 **{eco_paroi:.1f} / 100**")
+                else:
+                    st.markdown("Données éco-score insuffisantes.")
+
+            st.markdown("#### Détail des couches")
+            st.dataframe(df_paroi, use_container_width=True)
 
 # =========================
-# TAB 3: DATABASE STATISTICS (graphique + biosourcé)
+# ONGLET 3 : STATISTIQUES
 # =========================
 with tab3:
-    st.markdown("### 🌱 Database statistics (with biosourced focus)")
+    st.markdown("### 🌱 Statistiques globales (focus biosourcé)")
 
     def is_biosourced(df_):
         mask = pd.Series(False, index=df_.index)
@@ -587,15 +857,15 @@ with tab3:
 
     mc1, mc2, mc3 = st.columns(3)
     with mc1:
-        st.metric("Total materials", total)
+        st.metric("Matériaux totaux", total)
     with mc2:
-        st.metric("Biosourced materials", nb_bio)
+        st.metric("Matériaux biosourcés", nb_bio)
     with mc3:
-        st.metric("Share of biosourced", f"{share_bio:.1f} %")
+        st.metric("Part de biosourcé", f"{share_bio:.1f} %")
 
     st.markdown("---")
 
-    st.markdown("#### Average properties: biosourced vs other")
+    st.markdown("#### Propriétés moyennes : biosourcé vs autres")
 
     def avg_or_none(df_, col):
         if col in df_.columns and df_[col].notna().any():
@@ -604,68 +874,81 @@ with tab3:
 
     dens_bio = avg_or_none(df_bio, "masse_volumique_kg_m3")
     dens_other = avg_or_none(df_other, "masse_volumique_kg_m3")
-
     lambda_bio = avg_or_none(df_bio, "conductivite_w_mk")
     lambda_other = avg_or_none(df_other, "conductivite_w_mk")
-
     co2_bio = avg_or_none(df_bio, "empreinte_carbone_kgco2e_kg")
     co2_other = avg_or_none(df_other, "empreinte_carbone_kgco2e_kg")
+    eco_bio = avg_or_none(df_bio, "eco_score")
+    eco_other = avg_or_none(df_other, "eco_score")
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.caption("Average density (kg/m³)")
+        st.caption("Densité moyenne (kg/m³)")
         if dens_bio is not None and dens_other is not None:
-            st.write(f"🌱 Biosourced : **{dens_bio:.0f}**")
-            st.write(f"🏗️ Other     : **{dens_other:.0f}**")
+            st.write(f"🌱 Biosourcé : **{dens_bio:.0f}**")
+            st.write(f"🏗️ Autres   : **{dens_other:.0f}**")
         else:
-            st.write("Not enough data")
+            st.write("Données insuffisantes")
     with c2:
-        st.caption("Average λ (W/m·K)")
+        st.caption("λ moyenne (W/m·K)")
         if lambda_bio is not None and lambda_other is not None:
-            st.write(f"🌱 Biosourced : **{lambda_bio:.3f}**")
-            st.write(f"🏗️ Other     : **{lambda_other:.3f}**")
+            st.write(f"🌱 Biosourcé : **{lambda_bio:.3f}**")
+            st.write(f"🏗️ Autres   : **{lambda_other:.3f}**")
         else:
-            st.write("Not enough data")
+            st.write("Données insuffisantes")
     with c3:
-        st.caption("Average CO₂ footprint (kgCO₂e/kg)")
+        st.caption("Empreinte CO₂ moyenne (kgCO₂e/kg)")
         if co2_bio is not None and co2_other is not None:
-            st.write(f"🌱 Biosourced : **{co2_bio:.2f}**")
-            st.write(f"🏗️ Other     : **{co2_other:.2f}**")
+            st.write(f"🌱 Biosourcé : **{co2_bio:.2f}**")
+            st.write(f"🏗️ Autres   : **{co2_other:.2f}**")
         else:
-            st.write("Not enough data")
+            st.write("Données insuffisantes")
+    with c4:
+        st.caption("Éco-score moyen")
+        if eco_bio is not None and eco_other is not None:
+            st.write(f"🌱 Biosourcé : **{eco_bio:.1f} / 100**")
+            st.write(f"🏗️ Autres   : **{eco_other:.1f} / 100**")
+        else:
+            st.write("Données insuffisantes")
 
     st.markdown("---")
-    st.markdown("#### Distribution & charts")
+    st.markdown("#### Répartition & graphiques")
 
     col_a, col_b = st.columns(2)
 
     with col_a:
-        st.caption("Number of materials per type")
+        st.caption("Nombre de matériaux par type")
         if "type" in df.columns:
-            counts_type = df.groupby("type").size().reset_index(name="count")
+            counts_type = (
+                df.groupby("type")
+                .size()
+                .reset_index(name="nb_materiaux")
+            )
+
             chart_type = (
                 alt.Chart(counts_type)
                 .mark_bar()
                 .encode(
-                    x=alt.X("type:N", title="Type"),
-                    y=alt.Y("count:Q", title="Number of materials"),
-                    color="type:N",
-                    tooltip=["type", "count"],
+                    x=alt.X("type:N", sort="-y", title="Type"),
+                    y=alt.Y("nb_materiaux:Q", title="Nombre de matériaux"),
+                    color=alt.Color("type:N", legend=None),
+                    tooltip=["type", "nb_materiaux"],
                 )
                 .properties(height=300)
             )
+
             st.altair_chart(chart_type, use_container_width=True)
         else:
-            st.write("No 'type' column in data.")
+            st.write("Colonne 'type' absente des données.")
 
     with col_b:
-        st.caption("λ vs density (colored by type)")
+        st.caption("λ en fonction de la densité (coloré par type)")
         if "masse_volumique_kg_m3" in df.columns and "conductivite_w_mk" in df.columns:
             scatter = (
                 alt.Chart(df)
                 .mark_circle(size=80)
                 .encode(
-                    x=alt.X("masse_volumique_kg_m3:Q", title="Density (kg/m³)"),
+                    x=alt.X("masse_volumique_kg_m3:Q", title="Densité (kg/m³)"),
                     y=alt.Y("conductivite_w_mk:Q", title="λ (W/m·K)"),
                     color="type:N" if "type" in df.columns else alt.value("steelblue"),
                     tooltip=["nom", "type", "masse_volumique_kg_m3", "conductivite_w_mk"],
@@ -674,9 +957,9 @@ with tab3:
             )
             st.altair_chart(scatter, use_container_width=True)
         else:
-            st.write("Not enough data for λ vs density scatter plot.")
+            st.write("Données insuffisantes pour le nuage de points.")
 
-    st.markdown("#### Biosourced λ by type")
+    st.markdown("#### λ biosourcé par type")
     if not df_bio.empty and "type" in df_bio.columns and "conductivite_w_mk" in df_bio.columns:
         lambda_by_type_bio = (
             df_bio.groupby("type")["conductivite_w_mk"]
@@ -688,7 +971,7 @@ with tab3:
             .mark_bar()
             .encode(
                 x=alt.X("type:N", title="Type"),
-                y=alt.Y("lambda_mean:Q", title="Average λ (W/m·K)"),
+                y=alt.Y("lambda_mean:Q", title="λ moyen (W/m·K)"),
                 color="type:N",
                 tooltip=["type", "lambda_mean"],
             )
@@ -696,11 +979,67 @@ with tab3:
         )
         st.altair_chart(chart_bio, use_container_width=True)
     else:
-        st.write("No biosourced materials to plot λ by type.")
+        st.write("Aucun matériau biosourcé permettant de tracer λ par type.")
+
+    st.markdown("#### Distribution des éco-scores")
+    if "eco_score" in df.columns and df["eco_score"].notna().any():
+        eco_hist = (
+            alt.Chart(df.dropna(subset=["eco_score"]))
+            .mark_bar()
+            .encode(
+                x=alt.X("eco_score:Q", bin=alt.Bin(maxbins=15), title="Éco-score (0–100)"),
+                y=alt.Y("count():Q", title="Nombre de matériaux"),
+            )
+            .properties(height=250)
+        )
+        st.altair_chart(eco_hist, use_container_width=True)
+    else:
+        st.write("Pas encore assez de données éco-score pour tracer une distribution.")
 
 # =========================
-# TAB 4: MANAGE MATERIALS
+# ONGLET 4 : GESTION (explorateur)
 # =========================
 with tab4:
-    st.markdown("### Manage materials (coming later)")
-    st.write("Here you could later add forms to add/edit materials directly from the app.")
+    st.markdown("### 🗂 Gestion / exploration de la base")
+
+    st.write(
+        "Cet onglet permet de jeter un coup d’œil **brut** à la base de données : "
+        "recherche rapide, filtrage par type et export."
+    )
+
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        search_raw = st.text_input("🔎 Recherche texte (toutes colonnes)", "")
+    with col_f2:
+        type_raw = st.multiselect(
+            "Filtrer par type",
+            options=sorted(df["type"].dropna().unique()) if "type" in df.columns else [],
+        )
+
+    df_manage = df.copy()
+
+    if search_raw:
+        mask_any = pd.Series(False, index=df_manage.index)
+        for col in df_manage.columns:
+            mask_any = mask_any | df_manage[col].astype(str).str.contains(search_raw, case=False, na=False)
+        df_manage = df_manage[mask_any]
+
+    if type_raw and "type" in df_manage.columns:
+        df_manage = df_manage[df_manage["type"].isin(type_raw)]
+
+    st.markdown(f"**{len(df_manage)} ligne(s)** après filtrage.")
+    st.dataframe(df_manage, use_container_width=True, height=400)
+
+    csv_manage = df_manage.to_csv(index=False, sep=";").encode("utf-8")
+    st.download_button(
+        "📤 Exporter la vue filtrée (CSV brut)",
+        data=csv_manage,
+        file_name="materiaux_gestion.csv",
+        mime="text/csv",
+    )
+
+    st.markdown(
+        "> Pour un vrai module d’édition (ajout / modification avec sauvegarde dans le CSV), "
+        "> il faudrait ajouter une couche de gestion de fichiers côté serveur. "
+        "Ici, on reste sur une exploration sécurisée de la base."
+    )
